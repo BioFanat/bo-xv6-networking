@@ -19,10 +19,41 @@ static uint8 host_mac[ETHADDR_LEN] = { 0x52, 0x55, 0x0a, 0x00, 0x02, 0x02 };
 
 static struct spinlock netlock;
 
+// UDP receive queue structures
+#define NPORT 16        // max number of bound ports
+#define NPACKET 16      // max packets queued per port
+
+struct packet {
+  char *buf;            // packet buffer
+  uint32 src_ip;        // source IP address (host byte order)
+  uint16 src_port;      // source port (host byte order)
+  uint16 len;           // payload length
+};
+
+struct port {
+  int bound;            // is this port bound?
+  uint16 port;          // port number (host byte order)
+  struct packet packets[NPACKET];  // packet queue
+  int head;             // queue head index
+  int tail;             // queue tail index
+  int count;            // number of packets in queue
+};
+
+static struct port ports[NPORT];
+
 void
 netinit(void)
 {
   initlock(&netlock, "netlock");
+  
+  // initialize port structures
+  for(int i = 0; i < NPORT; i++) {
+    ports[i].bound = 0;
+    ports[i].port = 0;
+    ports[i].head = 0;
+    ports[i].tail = 0;
+    ports[i].count = 0;
+  }
 }
 
 
@@ -34,11 +65,34 @@ netinit(void)
 uint64
 sys_bind(void)
 {
-  //
-  // Your code here.
-  //
-
-  return -1;
+  int port;
+  argint(0, &port);
+  
+  acquire(&netlock);
+  
+  // check if port is already bound
+  for(int i = 0; i < NPORT; i++) {
+    if(ports[i].bound && ports[i].port == port) {
+      release(&netlock);
+      return 0;  // already bound, success
+    }
+  }
+  
+  // find a free port structure
+  for(int i = 0; i < NPORT; i++) {
+    if(!ports[i].bound) {
+      ports[i].bound = 1;
+      ports[i].port = port;
+      ports[i].head = 0;
+      ports[i].tail = 0;
+      ports[i].count = 0;
+      release(&netlock);
+      return 0;
+    }
+  }
+  
+  release(&netlock);
+  return -1;  // no free port structures
 }
 
 //
@@ -74,10 +128,77 @@ sys_unbind(void)
 uint64
 sys_recv(void)
 {
-  //
-  // Your code here.
-  //
-  return -1;
+  struct proc *p = myproc();
+  int dport;
+  uint64 src_addr, sport_addr, buf_addr;
+  int maxlen;
+  
+  argint(0, &dport);
+  argaddr(1, &src_addr);
+  argaddr(2, &sport_addr);
+  argaddr(3, &buf_addr);
+  argint(4, &maxlen);
+  
+  acquire(&netlock);
+  
+  // find the bound port
+  int port_idx = -1;
+  for(int i = 0; i < NPORT; i++) {
+    if(ports[i].bound && ports[i].port == dport) {
+      port_idx = i;
+      break;
+    }
+  }
+  
+  // if port not bound, error
+  if(port_idx == -1) {
+    release(&netlock);
+    return -1;
+  }
+  
+  // wait for a packet to arrive
+  while(ports[port_idx].count == 0) {
+    sleep(&ports[port_idx], &netlock);
+  }
+  
+  // get packet from head of queue
+  int head = ports[port_idx].head;
+  struct packet *pkt = &ports[port_idx].packets[head];
+  
+  uint32 src_ip = pkt->src_ip;
+  uint16 src_port = pkt->src_port;
+  uint16 pkt_len = pkt->len;
+  char *pkt_buf = pkt->buf;
+  
+  // update queue
+  ports[port_idx].head = (head + 1) % NPACKET;
+  ports[port_idx].count--;
+  
+  release(&netlock);
+  
+  // copy data to user space
+  int copy_len = pkt_len < maxlen ? pkt_len : maxlen;
+  
+  if(copyout(p->pagetable, buf_addr, pkt_buf, copy_len) < 0) {
+    kfree(pkt_buf);
+    return -1;
+  }
+  
+  // copy source IP and port to user space
+  if(copyout(p->pagetable, src_addr, (char *)&src_ip, sizeof(src_ip)) < 0) {
+    kfree(pkt_buf);
+    return -1;
+  }
+  
+  if(copyout(p->pagetable, sport_addr, (char *)&src_port, sizeof(src_port)) < 0) {
+    kfree(pkt_buf);
+    return -1;
+  }
+  
+  // free the packet buffer
+  kfree(pkt_buf);
+  
+  return copy_len;
 }
 
 // This code is lifted from FreeBSD's ping.c, and is copyright by the Regents
@@ -188,10 +309,86 @@ ip_rx(char *buf, int len)
     printf("ip_rx: received an IP packet\n");
   seen_ip = 1;
 
-  //
-  // Your code here.
-  //
+  // parse packet headers
+  struct eth *eth = (struct eth *)buf;
+  struct ip *ip = (struct ip *)(eth + 1);
+  struct udp *udp = (struct udp *)(ip + 1);
   
+  // check if it's a UDP packet
+  if(ip->ip_p != IPPROTO_UDP) {
+    kfree(buf);
+    return;
+  }
+  
+  // check minimum length for UDP
+  if(len < sizeof(struct eth) + sizeof(struct ip) + sizeof(struct udp)) {
+    kfree(buf);
+    return;
+  }
+  
+  // extract UDP info (convert from network to host byte order)
+  uint16 dport = ntohs(udp->dport);
+  uint16 sport = ntohs(udp->sport);
+  uint32 src_ip = ntohl(ip->ip_src);
+  uint16 udp_len = ntohs(udp->ulen);
+  
+  // calculate payload length
+  uint16 payload_len = udp_len - sizeof(struct udp);
+  
+  acquire(&netlock);
+  
+  // find the bound port
+  int port_idx = -1;
+  for(int i = 0; i < NPORT; i++) {
+    if(ports[i].bound && ports[i].port == dport) {
+      port_idx = i;
+      break;
+    }
+  }
+  
+  // if port not bound, drop packet
+  if(port_idx == -1) {
+    release(&netlock);
+    kfree(buf);
+    return;
+  }
+  
+  // if queue is full (16 packets), drop packet
+  if(ports[port_idx].count >= NPACKET) {
+    release(&netlock);
+    kfree(buf);
+    return;
+  }
+  
+  // allocate a new buffer for the payload
+  char *payload_buf = kalloc();
+  if(payload_buf == 0) {
+    release(&netlock);
+    kfree(buf);
+    return;
+  }
+  
+  // copy UDP payload
+  char *payload = (char *)(udp + 1);
+  memmove(payload_buf, payload, payload_len);
+  
+  // add packet to queue
+  int tail = ports[port_idx].tail;
+  ports[port_idx].packets[tail].buf = payload_buf;
+  ports[port_idx].packets[tail].src_ip = src_ip;
+  ports[port_idx].packets[tail].src_port = sport;
+  ports[port_idx].packets[tail].len = payload_len;
+  
+  ports[port_idx].tail = (tail + 1) % NPACKET;
+  ports[port_idx].count++;
+  
+  // wake up any process waiting for packets on this port
+  wakeup(&ports[port_idx]);
+  
+  release(&netlock);
+  
+  // free the original buffer (we've copied the payload)
+  kfree(buf);
 }
 
 //
