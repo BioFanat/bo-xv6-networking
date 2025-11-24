@@ -3,6 +3,18 @@
 #include "kernel/stat.h"
 #include "user/user.h"
 
+static uint64 get_time(void) {
+  return gettime();
+}
+
+static uint64 time_to_usec(uint64 time_diff) {
+  return time_diff / 10;  // 10MHz = 10 ticks per microsecond
+}
+
+static uint64 time_to_msec(uint64 time_diff) {
+  return time_diff / 10000;  // 10MHz = 10000 ticks per millisecond
+}
+
 static void
 usage(void)
 {
@@ -30,6 +42,8 @@ main(int argc, char *argv[])
     exit(1);
   }
 
+  uint64 start_time = get_time();
+
   printf("t(ms) rx_pkts rx_bytes udp_q udp_drop_full udp_drop_unbound udp_ret irq min_irq_dt max_irq_dt last_rx k_lat_avg k_lat_min k_lat_max k_samples\n");
 
   int iter = 0;
@@ -40,13 +54,23 @@ main(int argc, char *argv[])
       exit(1);
     }
 
-    // Cast to int for simple printing; durations are in rdtime ticks.
+    uint64 now = get_time();
+    uint64 elapsed_ms = time_to_msec(now - start_time);
+
     uint64 avg_klat = 0;
     if(s.kernel_latency_count > 0)
       avg_klat = s.kernel_latency_sum / s.kernel_latency_count;
 
-    printf("%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\n",
-           uptime(),
+    // convert timing units
+    uint64 min_irq_dt = time_to_usec(s.min_irq_delta);
+    uint64 max_irq_dt = time_to_usec(s.max_irq_delta);
+    uint64 last_rx = time_to_msec(s.last_recv_time);
+    uint64 k_lat_avg = time_to_usec(avg_klat);
+    uint64 k_lat_min = time_to_usec(s.min_kernel_latency);
+    uint64 k_lat_max = time_to_usec(s.max_kernel_latency);
+
+    printf("%lu %d %d %d %d %d %d %d %lu %lu %lu %lu %lu %lu %d\n",
+           elapsed_ms,
            (int)s.rx_packets,
            (int)s.rx_bytes,
            (int)s.udp_queued,
@@ -54,16 +78,19 @@ main(int argc, char *argv[])
            (int)s.udp_dropped_unbound,
            (int)s.udp_returned,
            (int)s.rx_interrupts,
-           (int)s.min_irq_delta,
-           (int)s.max_irq_delta,
-           (int)s.last_recv_time,
-           (int)avg_klat,
-           (int)s.min_kernel_latency,
-           (int)s.max_kernel_latency,
+           min_irq_dt,
+           max_irq_dt,
+           last_rx,
+           k_lat_avg,
+           k_lat_min,
+           k_lat_max,
            (int)s.kernel_latency_count);
 
     iter++;
-    pause(interval);
+    // note - 1 tick roughly 100ms
+    int sleep_ticks = (interval + 99) / 100; 
+    if(sleep_ticks < 1) sleep_ticks = 1;
+    pause(sleep_ticks);
   }
 
   exit(0);
