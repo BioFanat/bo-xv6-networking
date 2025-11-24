@@ -110,6 +110,8 @@ extern uint64 sys_bind(void);
 extern uint64 sys_unbind(void);
 extern uint64 sys_send(void);
 extern uint64 sys_recv(void);
+extern uint64 sys_netstats(void);
+extern uint64 sys_netreset(void);
 extern uint64 sys_rawsock_bind(void);
 extern uint64 sys_rawsock_recv(void);
 extern uint64 sys_rawsock_send(void);
@@ -153,6 +155,8 @@ static uint64 (*syscalls[])(void) = {
 [SYS_rawsock_recv] sys_rawsock_recv,
 [SYS_rawsock_send] sys_rawsock_send,
 [SYS_gettime] sys_gettime,
+[SYS_netstats] sys_netstats,
+[SYS_netreset] sys_netreset,
 #endif
 #ifdef LAB_PGTBL
 [SYS_pgpte] sys_pgpte,

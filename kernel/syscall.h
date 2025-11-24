@@ -39,3 +39,5 @@
 #define SYS_rawsock_recv     36
 #define SYS_rawsock_send     37
 #define SYS_gettime          38
+#define SYS_netstats  39
+#define SYS_netreset  40

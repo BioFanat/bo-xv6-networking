@@ -366,6 +366,8 @@ int main(int argc, char *argv[]) {
   uint16 pid = getpid() & 0xFFFF;
   int received = 0;
   uint64 total_rtt = 0;
+  uint64 min_rtt = (uint64)-1; 
+  uint64 max_rtt = 0;
   
   for (int seq = 0; seq < count; seq++) {
     // send ping
@@ -387,6 +389,9 @@ int main(int argc, char *argv[]) {
           received++;
           total_rtt += rtt;
           
+          if (rtt < min_rtt) min_rtt = rtt;
+          if (rtt > max_rtt) max_rtt = rtt;
+
           printf("%d bytes from ", 64);
           print_ip(src_ip);
           
@@ -431,13 +436,24 @@ int main(int argc, char *argv[]) {
   
   if (received > 0) {
     uint64 avg_rtt = total_rtt / received;
+    uint64 min_usec = time_to_usec(min_rtt);
     uint64 avg_usec = time_to_usec(avg_rtt);
-    uint64 avg_msec = time_to_msec(avg_rtt);
-    
-    if (avg_usec < 1000) {
-      printf("rtt avg = %d usec\n", (int)avg_usec);
+    uint64 max_usec = time_to_usec(max_rtt);
+
+    // Display min/avg/max (standard ping format)
+    if (max_usec < 1000) {
+      // All values under 1ms - show in usec
+      printf("rtt min/avg/max = %d/%d/%d usec\n",
+             (int)min_usec, (int)avg_usec, (int)max_usec);
     } else {
-      printf("rtt avg = %d.%d ms\n", (int)avg_msec, (int)((avg_usec % 1000) / 100));
+      // Some values over 1ms - show in ms with decimal
+      uint64 min_msec = time_to_msec(min_rtt);
+      uint64 avg_msec = time_to_msec(avg_rtt);
+      uint64 max_msec = time_to_msec(max_rtt);
+      printf("rtt min/avg/max = %d.%d/%d.%d/%d.%d ms\n",
+             (int)min_msec, (int)((min_usec % 1000) / 100),
+             (int)avg_msec, (int)((avg_usec % 1000) / 100),
+             (int)max_msec, (int)((max_usec % 1000) / 100));
     }
   }
   

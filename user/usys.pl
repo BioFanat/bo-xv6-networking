@@ -52,3 +52,5 @@ entry("rawsock_send");
 entry("gettime");
 entry("pgpte");
 entry("kpgtbl");
+entry("netstats");
+entry("netreset");

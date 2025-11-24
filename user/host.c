@@ -3,6 +3,18 @@
 #include "kernel/stat.h"
 #include "user/user.h"
 
+static uint64 get_time(void) {
+  return gettime();
+}
+
+static uint64 time_to_usec(uint64 time_diff) {
+  return time_diff / 10;  // 10MHz = 10 ticks per microsecond
+}
+
+static uint64 time_to_msec(uint64 time_diff) {
+  return time_diff / 10000;  // 10MHz = 10000 ticks per millisecond
+}
+
 // DNS server address
 #define DNS_SERVER_IP   0x0A000203  // 10.0.2.3
 #define DNS_SERVER_PORT 53
@@ -175,6 +187,8 @@ int main(int argc, char *argv[]) {
   int query_len = build_dns_query(query_buf, hostname);
   
   // send dns query
+  uint64 start_time = get_time();
+
   printf("Querying DNS for %s...\n", hostname);
   if (send(DNS_LOCAL_PORT, DNS_SERVER_IP, DNS_SERVER_PORT, query_buf, query_len) < 0) {
     printf("send() failed\n");
@@ -198,11 +212,25 @@ int main(int argc, char *argv[]) {
     printf("Failed to parse DNS response\n");
     exit(1);
   }
-  
+
   // print result
+
+  uint64 end_time = get_time();
+  uint64 dns_latency = end_time - start_time;
+
   printf("%s has address ", hostname);
   print_ip(ip_addr);
-  
+
+  uint64 latency_usec = time_to_usec(dns_latency);
+  uint64 latency_msec = time_to_msec(dns_latency);
+
+  if (latency_usec < 1000) {
+    printf(" (query time: %d usec)\n", (int)latency_usec);
+  } else {
+    printf(" (query time: %d.%d ms)\n",
+           (int)latency_msec, (int)((latency_usec % 1000) / 100));
+  }
+
   exit(0);
 }
 

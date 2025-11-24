@@ -18,6 +18,7 @@ static uint32 local_ip = MAKE_IP_ADDR(10, 0, 2, 15);
 static uint8 host_mac[ETHADDR_LEN] = { 0x52, 0x55, 0x0a, 0x00, 0x02, 0x02 };
 
 static struct spinlock netlock;
+extern struct spinlock e1000_lock;
 
 // Forward declarations
 static unsigned short in_cksum(const unsigned char *addr, int len);
@@ -43,6 +44,7 @@ struct port {
 };
 
 static struct port ports[NPORT];
+struct netstats netstats;
 
 // Raw socket (for ICMP) structures
 #define NRAWSOCK 4      // max number of raw sockets
@@ -69,7 +71,11 @@ void
 netinit(void)
 {
   initlock(&netlock, "netlock");
-  
+
+  memset(&netstats, 0, sizeof(netstats));
+  netstats.min_irq_delta = (uint64)-1;
+  netstats.min_kernel_latency = (uint64)-1;
+
   // initialize port structures
   for(int i = 0; i < NPORT; i++) {
     ports[i].bound = 0;
@@ -391,6 +397,7 @@ sys_recv(void)
   
   // free the packet buffer
   kfree(pkt_buf);
+  netstats.udp_returned++;
   
   return copy_len;
 }
@@ -494,6 +501,29 @@ sys_send(void)
   return 0;
 }
 
+uint64
+sys_netstats(void)
+{
+  uint64 uaddr;
+  struct netstats snap;
+
+  argaddr(0, &uaddr);
+  memmove(&snap, &netstats, sizeof(snap));
+
+  if(copyout(myproc()->pagetable, uaddr, (char *)&snap, sizeof(snap)) < 0)
+    return -1;
+  return 0;
+}
+
+uint64
+sys_netreset(void)
+{
+  memset(&netstats, 0, sizeof(netstats));
+  netstats.min_irq_delta = (uint64)-1;
+  netstats.min_kernel_latency = (uint64)-1;
+  return 0;
+}
+
 void
 ip_rx(char *buf, int len)
 {
@@ -586,6 +616,7 @@ ip_rx(char *buf, int len)
   
   // if port not bound, drop packet
   if(port_idx == -1) {
+    netstats.udp_dropped_unbound++;
     release(&netlock);
     kfree(buf);
     return;
@@ -593,6 +624,7 @@ ip_rx(char *buf, int len)
   
   // if queue is full (16 packets), drop packet
   if(ports[port_idx].count >= NPACKET) {
+    netstats.udp_dropped_full++;
     release(&netlock);
     kfree(buf);
     return;
@@ -619,10 +651,30 @@ ip_rx(char *buf, int len)
   
   ports[port_idx].tail = (tail + 1) % NPACKET;
   ports[port_idx].count++;
+  netstats.udp_queued++;
   
   // wake up any process waiting for packets on this port
   wakeup(&ports[port_idx]);
-  
+
+  // kernel latency calculations
+  acquire(&e1000_lock);
+  if(netstats.irq_entry_time != 0) {
+    uint64 wakeup_time = r_time();
+    uint64 latency = wakeup_time - netstats.irq_entry_time;
+
+    netstats.kernel_latency_sum += latency;
+    netstats.kernel_latency_count++;
+
+    if(netstats.min_kernel_latency == (uint64)-1 || latency < netstats.min_kernel_latency)
+      netstats.min_kernel_latency = latency;
+
+    if(latency > netstats.max_kernel_latency)
+      netstats.max_kernel_latency = latency;
+
+    netstats.irq_entry_time = 0;
+  }
+  release(&e1000_lock);
+
   release(&netlock);
   
   // free the original buffer (we've copied the payload)
