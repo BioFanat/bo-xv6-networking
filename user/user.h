@@ -6,6 +6,7 @@ typedef long int off_t;
 #define SBRK_ERROR ((char *)-1)
 
 struct stat;
+struct netstats;
 
 // system calls
 int fork(void);
@@ -34,6 +35,8 @@ int bind(uint16);
 int unbind(uint16);
 int send(uint16, uint32, uint16, char *, uint32);
 int recv(uint16, uint32*, uint16*, char *, uint32);
+int netstats(struct netstats*);
+int netreset(void);
 #endif
 #ifdef LAB_PGTBL
 int ugetpid(void);

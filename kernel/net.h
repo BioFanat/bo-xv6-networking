@@ -125,3 +125,19 @@ struct dns_data {
   uint32 ttl;
   uint16 len;
 } __attribute__((packed));
+
+struct netstats {
+  uint64 rx_packets;            // packet frames in ring
+  uint64 rx_bytes;              // bytes of those frames
+  uint64 rx_ring_empty;         // how often recv found an empty ring
+  uint64 rx_interrupts;         // receive interrupt handled
+  uint64 last_irq_time;         // last interrupt (from rdtime ticks)
+  uint64 min_irq_delta;         // closest rx irq
+  uint64 max_irq_delta;         // furthest rx irq
+  uint64 last_recv_time;        // last packet received
+
+  uint64 udp_queued;            // queued in port
+  uint64 udp_dropped_unbound;   // dropped from an unbound port
+  uint64 udp_dropped_full;      // dropped from full queue
+  uint64 udp_returned;          // successfully delivered to recv
+};

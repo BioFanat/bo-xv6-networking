@@ -40,11 +40,15 @@ struct port {
 };
 
 static struct port ports[NPORT];
+struct netstats netstats;
 
 void
 netinit(void)
 {
   initlock(&netlock, "netlock");
+
+  memset(&netstats, 0, sizeof(netstats));
+  netstats.min_irq_delta = (uint64)-1;
   
   // initialize port structures
   for(int i = 0; i < NPORT; i++) {
@@ -197,6 +201,7 @@ sys_recv(void)
   
   // free the packet buffer
   kfree(pkt_buf);
+  netstats.udp_returned++;
   
   return copy_len;
 }
@@ -300,6 +305,28 @@ sys_send(void)
   return 0;
 }
 
+uint64
+sys_netstats(void)
+{
+  uint64 uaddr;
+  struct netstats snap;
+
+  argaddr(0, &uaddr);
+  memmove(&snap, &netstats, sizeof(snap));
+
+  if(copyout(myproc()->pagetable, uaddr, (char *)&snap, sizeof(snap)) < 0)
+    return -1;
+  return 0;
+}
+
+uint64
+sys_netreset(void)
+{
+  memset(&netstats, 0, sizeof(netstats));
+  netstats.min_irq_delta = (uint64)-1;
+  return 0;
+}
+
 void
 ip_rx(char *buf, int len)
 {
@@ -348,6 +375,7 @@ ip_rx(char *buf, int len)
   
   // if port not bound, drop packet
   if(port_idx == -1) {
+    netstats.udp_dropped_unbound++;
     release(&netlock);
     kfree(buf);
     return;
@@ -355,6 +383,7 @@ ip_rx(char *buf, int len)
   
   // if queue is full (16 packets), drop packet
   if(ports[port_idx].count >= NPACKET) {
+    netstats.udp_dropped_full++;
     release(&netlock);
     kfree(buf);
     return;
@@ -381,6 +410,7 @@ ip_rx(char *buf, int len)
   
   ports[port_idx].tail = (tail + 1) % NPACKET;
   ports[port_idx].count++;
+  netstats.udp_queued++;
   
   // wake up any process waiting for packets on this port
   wakeup(&ports[port_idx]);

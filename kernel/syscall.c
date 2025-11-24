@@ -110,6 +110,8 @@ extern uint64 sys_bind(void);
 extern uint64 sys_unbind(void);
 extern uint64 sys_send(void);
 extern uint64 sys_recv(void);
+extern uint64 sys_netstats(void);
+extern uint64 sys_netreset(void);
 #endif
 #ifdef LAB_PGTBL
 extern uint64 sys_pgpte(void);
@@ -145,6 +147,8 @@ static uint64 (*syscalls[])(void) = {
 [SYS_unbind] sys_unbind,
 [SYS_send] sys_send,
 [SYS_recv] sys_recv,
+[SYS_netstats] sys_netstats,
+[SYS_netreset] sys_netreset,
 #endif
 #ifdef LAB_PGTBL
 [SYS_pgpte] sys_pgpte,

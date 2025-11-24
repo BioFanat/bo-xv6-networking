@@ -239,5 +239,7 @@ int             e1000_transmit(char *, int);
 // net.c
 void            netinit(void);
 void            net_rx(char *buf, int len);
+uint64          sys_netstats(void);
+uint64          sys_netreset(void);
 
 #endif

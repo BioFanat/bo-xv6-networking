@@ -6,6 +6,7 @@
 #include "proc.h"
 #include "defs.h"
 #include "e1000_dev.h"
+#include "net.h"
 
 #define TX_RING_SIZE 16
 static struct tx_desc tx_ring[TX_RING_SIZE] __attribute__((aligned(16)));
@@ -17,6 +18,7 @@ static struct rx_desc rx_ring[RX_RING_SIZE] __attribute__((aligned(16)));
 static volatile uint32 *regs;
 
 struct spinlock e1000_lock;
+extern struct netstats netstats;
 
 // called by pci_init().
 // xregs is the memory address at which the
@@ -155,12 +157,16 @@ e1000_recv(void)
     // Check if a packet is ready (DD bit must be set)
     if((rx_ring[rdt].status & E1000_RXD_STAT_DD) == 0) {
       // No more packets ready
+      netstats.rx_ring_empty++;
       break;
     }
     
     // Extract the packet buffer and length
     char *buf = (char *)rx_ring[rdt].addr;
     uint16 len = rx_ring[rdt].length;
+    netstats.rx_packets++;
+    netstats.rx_bytes += len;
+    netstats.last_recv_time = r_time();
     
     // Allocate a new buffer for this descriptor BEFORE releasing the lock
     char *newbuf = (char *)kalloc();
@@ -196,6 +202,20 @@ e1000_intr(void)
   // without this the e1000 won't raise any
   // further interrupts.
   regs[E1000_ICR] = 0xffffffff;
+
+  // Track interrupt timing.
+  acquire(&e1000_lock);
+  uint64 now = r_time();
+  netstats.rx_interrupts++;
+  if(netstats.last_irq_time != 0) {
+    uint64 delta = now - netstats.last_irq_time;
+    if(netstats.min_irq_delta == (uint64)-1 || delta < netstats.min_irq_delta)
+      netstats.min_irq_delta = delta;
+    if(delta > netstats.max_irq_delta)
+      netstats.max_irq_delta = delta;
+  }
+  netstats.last_irq_time = now;
+  release(&e1000_lock);
 
   e1000_recv();
 }
