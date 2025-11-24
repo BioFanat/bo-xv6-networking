@@ -20,6 +20,9 @@ static uint8 host_mac[ETHADDR_LEN] = { 0x52, 0x55, 0x0a, 0x00, 0x02, 0x02 };
 static struct spinlock netlock;
 extern struct spinlock e1000_lock;
 
+// Forward declarations
+static unsigned short in_cksum(const unsigned char *addr, int len);
+
 // UDP receive queue structures
 #define NPORT 16        // max number of bound ports
 #define NPACKET 16      // max packets queued per port
@@ -43,6 +46,27 @@ struct port {
 static struct port ports[NPORT];
 struct netstats netstats;
 
+// Raw socket (for ICMP) structures
+#define NRAWSOCK 4      // max number of raw sockets
+
+struct raw_packet {
+  char *buf;            // packet buffer (full IP packet)
+  uint32 src_ip;        // source IP address (host byte order)
+  uint16 len;           // total packet length
+  uint8 protocol;       // IP protocol number
+};
+
+struct raw_socket {
+  int bound;            // is this socket bound?
+  uint8 protocol;       // protocol to receive (e.g., IPPROTO_ICMP)
+  struct raw_packet packets[NPACKET];  // packet queue
+  int head;             // queue head index
+  int tail;             // queue tail index
+  int count;            // number of packets in queue
+};
+
+static struct raw_socket raw_sockets[NRAWSOCK];
+
 void
 netinit(void)
 {
@@ -59,6 +83,15 @@ netinit(void)
     ports[i].head = 0;
     ports[i].tail = 0;
     ports[i].count = 0;
+  }
+  
+  // initialize raw socket structures
+  for(int i = 0; i < NRAWSOCK; i++) {
+    raw_sockets[i].bound = 0;
+    raw_sockets[i].protocol = 0;
+    raw_sockets[i].head = 0;
+    raw_sockets[i].tail = 0;
+    raw_sockets[i].count = 0;
   }
 }
 
@@ -113,6 +146,167 @@ sys_unbind(void)
   // Optional: Your code here.
   //
 
+  return 0;
+}
+
+//
+// rawsock_bind(int protocol)
+// Create a raw socket for receiving packets of a specific protocol
+// Returns socket ID (0-3) on success, -1 on failure
+//
+uint64
+sys_rawsock_bind(void)
+{
+  int protocol;
+  argint(0, &protocol);
+  
+  acquire(&netlock);
+  
+  // check if protocol is already bound
+  for(int i = 0; i < NRAWSOCK; i++) {
+    if(raw_sockets[i].bound && raw_sockets[i].protocol == protocol) {
+      release(&netlock);
+      return i;  // return existing socket
+    }
+  }
+  
+  // find a free raw socket
+  for(int i = 0; i < NRAWSOCK; i++) {
+    if(!raw_sockets[i].bound) {
+      raw_sockets[i].bound = 1;
+      raw_sockets[i].protocol = protocol;
+      raw_sockets[i].head = 0;
+      raw_sockets[i].tail = 0;
+      raw_sockets[i].count = 0;
+      release(&netlock);
+      return i;  // return socket ID
+    }
+  }
+  
+  release(&netlock);
+  return -1;  // no free sockets
+}
+
+//
+// rawsock_recv(int sockid, int *src, char *buf, int maxlen)
+// Receive a raw IP packet
+// Returns packet length on success, -1 on error
+//
+uint64
+sys_rawsock_recv(void)
+{
+  struct proc *p = myproc();
+  int sockid;
+  uint64 src_addr, buf_addr;
+  int maxlen;
+  
+  argint(0, &sockid);
+  argaddr(1, &src_addr);
+  argaddr(2, &buf_addr);
+  argint(3, &maxlen);
+  
+  if(sockid < 0 || sockid >= NRAWSOCK)
+    return -1;
+  
+  acquire(&netlock);
+  
+  // check if socket is bound
+  if(!raw_sockets[sockid].bound) {
+    release(&netlock);
+    return -1;
+  }
+  
+  // wait for a packet to arrive
+  while(raw_sockets[sockid].count == 0) {
+    sleep(&raw_sockets[sockid], &netlock);
+  }
+  
+  // get packet from head of queue
+  int head = raw_sockets[sockid].head;
+  struct raw_packet *pkt = &raw_sockets[sockid].packets[head];
+  
+  uint32 src_ip = pkt->src_ip;
+  uint16 pkt_len = pkt->len;
+  char *pkt_buf = pkt->buf;
+  
+  // update queue
+  raw_sockets[sockid].head = (head + 1) % NPACKET;
+  raw_sockets[sockid].count--;
+  
+  release(&netlock);
+  
+  // copy data to user space
+  int copy_len = pkt_len < maxlen ? pkt_len : maxlen;
+  
+  if(copyout(p->pagetable, buf_addr, pkt_buf, copy_len) < 0) {
+    kfree(pkt_buf);
+    return -1;
+  }
+  
+  // copy source IP to user space
+  if(copyout(p->pagetable, src_addr, (char *)&src_ip, sizeof(src_ip)) < 0) {
+    kfree(pkt_buf);
+    return -1;
+  }
+  
+  // free the packet buffer
+  kfree(pkt_buf);
+  
+  return copy_len;
+}
+
+//
+// rawsock_send(int dst, int protocol, char *buf, int len)
+// Send a raw IP packet
+//
+uint64
+sys_rawsock_send(void)
+{
+  struct proc *p = myproc();
+  int dst;
+  int protocol;
+  uint64 bufaddr;
+  int len;
+  
+  argint(0, &dst);
+  argint(1, &protocol);
+  argaddr(2, &bufaddr);
+  argint(3, &len);
+  
+  int total = len + sizeof(struct eth) + sizeof(struct ip);
+  if(total > PGSIZE)
+    return -1;
+  
+  char *buf = kalloc();
+  if(buf == 0)
+    return -1;
+  memset(buf, 0, PGSIZE);
+  
+  struct eth *eth = (struct eth *)buf;
+  memmove(eth->dhost, host_mac, ETHADDR_LEN);
+  memmove(eth->shost, local_mac, ETHADDR_LEN);
+  eth->type = htons(ETHTYPE_IP);
+  
+  struct ip *ip = (struct ip *)(eth + 1);
+  ip->ip_vhl = 0x45;
+  ip->ip_tos = 0;
+  ip->ip_len = htons(sizeof(struct ip) + len);
+  ip->ip_id = 0;
+  ip->ip_off = 0;
+  ip->ip_ttl = 64;
+  ip->ip_p = protocol;
+  ip->ip_src = htonl(local_ip);
+  ip->ip_dst = htonl(dst);
+  ip->ip_sum = in_cksum((unsigned char *)ip, sizeof(*ip));
+  
+  char *payload = (char *)(ip + 1);
+  if(copyin(p->pagetable, payload, bufaddr, len) < 0) {
+    kfree(buf);
+    return -1;
+  }
+  
+  e1000_transmit(buf, total);
+  
   return 0;
 }
 
@@ -342,13 +536,58 @@ ip_rx(char *buf, int len)
   // parse packet headers
   struct eth *eth = (struct eth *)buf;
   struct ip *ip = (struct ip *)(eth + 1);
-  struct udp *udp = (struct udp *)(ip + 1);
+  uint32 src_ip = ntohl(ip->ip_src);
+  uint8 protocol = ip->ip_p;
   
-  // check if it's a UDP packet
-  if(ip->ip_p != IPPROTO_UDP) {
+  // check for raw sockets first (ICMP, etc.)
+  acquire(&netlock);
+  
+  int raw_sock_idx = -1;
+  for(int i = 0; i < NRAWSOCK; i++) {
+    if(raw_sockets[i].bound && raw_sockets[i].protocol == protocol) {
+      raw_sock_idx = i;
+      break;
+    }
+  }
+  
+  if(raw_sock_idx != -1) {
+    // deliver to raw socket
+    if(raw_sockets[raw_sock_idx].count < NPACKET) {
+      // allocate buffer for full IP packet
+      char *pkt_buf = kalloc();
+      if(pkt_buf != 0) {
+        // copy the IP packet (without ethernet header)
+        int ip_len = len - sizeof(struct eth);
+        memmove(pkt_buf, (char *)ip, ip_len);
+        
+        // add to raw socket queue
+        int tail = raw_sockets[raw_sock_idx].tail;
+        raw_sockets[raw_sock_idx].packets[tail].buf = pkt_buf;
+        raw_sockets[raw_sock_idx].packets[tail].src_ip = src_ip;
+        raw_sockets[raw_sock_idx].packets[tail].len = ip_len;
+        raw_sockets[raw_sock_idx].packets[tail].protocol = protocol;
+        
+        raw_sockets[raw_sock_idx].tail = (tail + 1) % NPACKET;
+        raw_sockets[raw_sock_idx].count++;
+        
+        // wake up any process waiting
+        wakeup(&raw_sockets[raw_sock_idx]);
+      }
+    }
+    release(&netlock);
     kfree(buf);
     return;
   }
+  
+  release(&netlock);
+  
+  // check if it's a UDP packet
+  if(protocol != IPPROTO_UDP) {
+    kfree(buf);
+    return;
+  }
+  
+  struct udp *udp = (struct udp *)(ip + 1);
   
   // check minimum length for UDP
   if(len < sizeof(struct eth) + sizeof(struct ip) + sizeof(struct udp)) {
@@ -359,7 +598,6 @@ ip_rx(char *buf, int len)
   // extract UDP info (convert from network to host byte order)
   uint16 dport = ntohs(udp->dport);
   uint16 sport = ntohs(udp->sport);
-  uint32 src_ip = ntohl(ip->ip_src);
   uint16 udp_len = ntohs(udp->ulen);
   
   // calculate payload length

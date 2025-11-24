@@ -279,7 +279,9 @@ ifeq ($(LAB),net)
 UPROGS += \
 	$U/_nettest\
 	$U/_netmon\
-	$U/_netloop
+	$U/_netloop\
+	$U/_host\
+	$U/_ping
 endif
 
 UEXTRA=
