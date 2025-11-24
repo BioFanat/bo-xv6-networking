@@ -34,6 +34,10 @@ int bind(uint16);
 int unbind(uint16);
 int send(uint16, uint32, uint16, char *, uint32);
 int recv(uint16, uint32*, uint16*, char *, uint32);
+int rawsock_bind(int);
+int rawsock_recv(int, uint32*, char *, uint32);
+int rawsock_send(uint32, int, char *, uint32);
+uint64 gettime(void);
 #endif
 #ifdef LAB_PGTBL
 int ugetpid(void);

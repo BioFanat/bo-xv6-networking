@@ -69,6 +69,19 @@ struct udp {
   uint16 sum;   // checksum
 };
 
+// ICMP packet header (comes after an IP header).
+struct icmp {
+  uint8  type;     // ICMP type
+  uint8  code;     // ICMP code
+  uint16 checksum; // ICMP checksum
+  uint16 id;       // identifier (for echo request/reply)
+  uint16 seq;      // sequence number (for echo request/reply)
+} __attribute__((packed));
+
+// ICMP types
+#define ICMP_ECHO_REPLY   0
+#define ICMP_ECHO_REQUEST 8
+
 // an ARP packet (comes after an Ethernet header).
 struct arp {
   uint16 hrd; // format of hardware address
