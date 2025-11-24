@@ -1,18 +1,13 @@
-//
-// ping - ICMP echo request/reply utility with DNS support
-//
-
 #include "kernel/types.h"
 #include "kernel/net.h"
 #include "kernel/stat.h"
 #include "user/user.h"
 
-// DNS configuration
 #define DNS_SERVER_IP   0x0A000203  // 10.0.2.3 (QEMU DNS server)
 #define DNS_SERVER_PORT 53
 #define DNS_LOCAL_PORT  12345
 
-// Encode a hostname into DNS wire format
+// hostname -> dns wire
 int encode_dns_name(char *encoded, char *hostname) {
   char *ptr = encoded;
   char *label_start = ptr;
@@ -42,7 +37,6 @@ int encode_dns_name(char *encoded, char *hostname) {
   return ptr - encoded;
 }
 
-// Build a DNS query packet
 int build_dns_query(char *buf, char *hostname) {
   uint16 *ptr16 = (uint16 *)buf;
   
@@ -63,7 +57,7 @@ int build_dns_query(char *buf, char *hostname) {
   return 12 + name_len + sizeof(struct dns_question);
 }
 
-// Skip over a DNS name in the response
+// skip name in resp
 char *skip_dns_name(char *buf, char *start) {
   while (*buf != 0) {
     if ((*buf & 0xC0) == 0xC0) {
@@ -75,7 +69,6 @@ char *skip_dns_name(char *buf, char *start) {
   return buf + 1;
 }
 
-// Parse DNS response and extract IP address
 int parse_dns_response(char *buf, int len, uint32 *ip_addr) {
   if (len < 12) {
     return -1;
@@ -125,7 +118,7 @@ int parse_dns_response(char *buf, int len, uint32 *ip_addr) {
   return -1;
 }
 
-// Resolve hostname to IP address
+// resolve hostname -> ip
 int resolve_hostname(char *hostname, uint32 *ip_addr) {
   if (bind(DNS_LOCAL_PORT) < 0) {
     return -1;
@@ -150,20 +143,19 @@ int resolve_hostname(char *hostname, uint32 *ip_addr) {
   return parse_dns_response(response_buf, response_len, ip_addr);
 }
 
-// Check if string is a hostname or IP address
 int is_ip_address(char *str) {
   int dots = 0;
   for (int i = 0; str[i]; i++) {
     if (str[i] == '.') {
       dots++;
     } else if (str[i] < '0' || str[i] > '9') {
-      return 0;  // not an IP
+      return 0; 
     }
   }
   return dots == 3;
 }
 
-// ICMP checksum calculation
+// calc icmp checksum
 static uint16 icmp_checksum(uint16 *addr, int len) {
   uint32 sum = 0;
   uint16 *w = addr;
@@ -188,74 +180,61 @@ static uint16 icmp_checksum(uint16 *addr, int len) {
   return ~sum;
 }
 
-// Get high-resolution time using system call (10MHz clock)
 static uint64 get_time(void) {
   return gettime();
 }
 
-// Convert time units to microseconds (rdtime is 10MHz = 0.1us per tick)
 static uint64 time_to_usec(uint64 time_diff) {
   return time_diff / 10;  // 10MHz = 10 ticks per microsecond
 }
 
-// Convert time units to milliseconds
 static uint64 time_to_msec(uint64 time_diff) {
   return time_diff / 10000;  // 10MHz = 10000 ticks per millisecond
 }
 
-// Send ICMP Echo Request
+// send icmp echo request
 int send_ping(uint32 dst_ip, uint16 id, uint16 seq) {
   char buf[64];
   struct icmp *icmp_hdr = (struct icmp *)buf;
   
-  // build ICMP header
   icmp_hdr->type = ICMP_ECHO_REQUEST;
   icmp_hdr->code = 0;
   icmp_hdr->checksum = 0;
   icmp_hdr->id = htons(id);
   icmp_hdr->seq = htons(seq);
   
-  // add data: timestamp at start, then pad to 56 bytes total
   uint64 *timestamp = (uint64 *)(buf + sizeof(struct icmp));
   *timestamp = get_time();
   
-  // fill rest with pattern (standard ping uses incrementing byte pattern)
   for (int i = sizeof(struct icmp) + sizeof(uint64); i < sizeof(struct icmp) + 56; i++) {
     buf[i] = (i - sizeof(struct icmp)) & 0xFF;
   }
   
   int packet_len = sizeof(struct icmp) + 56;  // 8 + 56 = 64 bytes total
   
-  // calculate checksum
   icmp_hdr->checksum = icmp_checksum((uint16 *)buf, packet_len);
   
-  // send via raw socket
   return rawsock_send(dst_ip, IPPROTO_ICMP, buf, packet_len);
 }
 
-// Receive ICMP Echo Reply
+// receive icmp echo reply
 int recv_ping(int sockid, uint32 *src_ip, uint16 *reply_id, uint16 *reply_seq, uint64 *rtt) {
   char buf[512];
   
-  // receive IP packet
   int len = rawsock_recv(sockid, src_ip, buf, sizeof(buf));
   if (len < 0) {
     return -1;
   }
   
-  // parse IP header
   struct ip *ip_hdr = (struct ip *)buf;
   int ip_header_len = (ip_hdr->ip_vhl & 0x0f) * 4;
   
-  // check if it's ICMP
   if (ip_hdr->ip_p != IPPROTO_ICMP) {
     return -1;
   }
   
-  // parse ICMP header
   struct icmp *icmp_hdr = (struct icmp *)(buf + ip_header_len);
   
-  // check if it's an Echo Reply
   if (icmp_hdr->type != ICMP_ECHO_REPLY) {
     return -1;
   }
@@ -263,7 +242,6 @@ int recv_ping(int sockid, uint32 *src_ip, uint16 *reply_id, uint16 *reply_seq, u
   *reply_id = ntohs(icmp_hdr->id);
   *reply_seq = ntohs(icmp_hdr->seq);
   
-  // calculate round-trip time
   uint64 *timestamp = (uint64 *)(buf + ip_header_len + sizeof(struct icmp));
   uint64 now = get_time();
   *rtt = now - *timestamp;
@@ -271,7 +249,6 @@ int recv_ping(int sockid, uint32 *src_ip, uint16 *reply_id, uint16 *reply_seq, u
   return 0;
 }
 
-// Print IP address (without newline)
 void print_ip(uint32 ip) {
   printf("%d.%d.%d.%d",
          (ip >> 24) & 0xFF,
@@ -280,18 +257,9 @@ void print_ip(uint32 ip) {
          ip & 0xFF);
 }
 
-// Print IP address with newline
-void print_ip_ln(uint32 ip) {
-  print_ip(ip);
-  printf("\n");
-}
-
 int main(int argc, char *argv[]) {
   if (argc != 2 && argc != 3) {
     printf("Usage: ping <hostname|ip_address> [count]\n");
-    printf("Example: ping google.com\n");
-    printf("Example: ping 10.0.2.2\n");
-    printf("Example: ping 8.8.8.8 4\n");
     exit(1);
   }
   
@@ -376,7 +344,7 @@ int main(int argc, char *argv[]) {
       continue;
     }
     
-    // wait for reply (with timeout simulation using multiple attempts)
+    // wait for reply (timeout simulated via multiple attempts)
     int timeout = 0;
     while (timeout < 3) {  // try 3 times
       uint32 src_ip;
@@ -395,14 +363,12 @@ int main(int argc, char *argv[]) {
           printf("%d bytes from ", 64);
           print_ip(src_ip);
           
-          // display time in appropriate units
           uint64 rtt_usec = time_to_usec(rtt);
           if (rtt_usec < 1000) {
             printf(": icmp_seq=%d time=%d usec\n", seq, (int)rtt_usec);
           } else {
             uint64 rtt_msec = time_to_msec(rtt);
             if (rtt_msec < 10) {
-              // show as decimal milliseconds for < 10ms
               printf(": icmp_seq=%d time=%d.%d ms\n", seq, 
                      (int)rtt_msec, (int)((rtt_usec % 1000) / 100));
             } else {
@@ -419,11 +385,9 @@ int main(int argc, char *argv[]) {
       printf("Request timeout for icmp_seq %d\n", seq);
     }
     
-    // small delay between pings
     pause(10);
   }
   
-  // print statistics
   printf("\n--- ");
   if (is_ip_address(target)) {
     print_ip(dst_ip);
@@ -440,13 +404,10 @@ int main(int argc, char *argv[]) {
     uint64 avg_usec = time_to_usec(avg_rtt);
     uint64 max_usec = time_to_usec(max_rtt);
 
-    // Display min/avg/max (standard ping format)
     if (max_usec < 1000) {
-      // All values under 1ms - show in usec
       printf("rtt min/avg/max = %d/%d/%d usec\n",
              (int)min_usec, (int)avg_usec, (int)max_usec);
     } else {
-      // Some values over 1ms - show in ms with decimal
       uint64 min_msec = time_to_msec(min_rtt);
       uint64 avg_msec = time_to_msec(avg_rtt);
       uint64 max_msec = time_to_msec(max_rtt);
