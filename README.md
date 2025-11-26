@@ -16,7 +16,7 @@ A comprehensive networking stack implementation for xv6. This project adds full 
 
 ## References and Links
 
-MIT Lab: https://pdos.csail.mit.edu/6.1810/2025/labs/net.html
-Lab Base Code: https://pdos.csail.mit.edu/6.1810/2025/labs/util.html (repo in first block)
-RFC 1035 - Domain Names - Implementation and Specification (DNS): https://www.rfc-editor.org/rfc/rfc1035
-RFC 792 - Internet Control Message Protocol (ICMP): https://www.rfc-editor.org/rfc/rfc792
+- MIT Lab: https://pdos.csail.mit.edu/6.1810/2025/labs/net.html
+- Lab Base Code: https://pdos.csail.mit.edu/6.1810/2025/labs/util.html (repo in first block)
+- RFC 1035 - Domain Names - Implementation and Specification (DNS): https://www.rfc-editor.org/rfc/rfc1035
+- RFC 792 - Internet Control Message Protocol (ICMP): https://www.rfc-editor.org/rfc/rfc792
