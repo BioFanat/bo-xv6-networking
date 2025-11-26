@@ -14,6 +14,13 @@ A comprehensive networking stack implementation for xv6. This project adds full 
 - **`host`** (`user/host.c`) - DNS client for hostname resolution
 - **`ping`** (`user/ping.c`) - ICMP echo utility with integrated DNS support
 
+## Noted Limitations / Future Updates
+
+- QEMU emulation appears to be a bottleneck, at both the network stack layers (particularly in the packet arrival rate and the emulated NIC to be able to take in bursty traffic) and in the connection between user programs with the outside world (with consistent website-neutral overhead on ping)
+- Significantly increased drops with bursty traffic - one working solution has just been to increase the queue size (for each port), but this seems like an untenable solution. Also note apparent kernel saturation significantly increases the time to add new packets to the queue as traffic increases.
+- Idea: security layer (TLS, TCP support) to build on top of basic UDP networking with modern protocols
+- Idea: HTTP client, make requests, download webpages
+
 ## References and Links
 
 - MIT Lab: https://pdos.csail.mit.edu/6.1810/2025/labs/net.html
