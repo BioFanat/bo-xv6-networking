@@ -170,6 +170,13 @@ clockintr()
     ticks++;
     wakeup(&ticks);
     release(&tickslock);
+
+#ifdef LAB_NET
+    // Check TCP timers every ~1 second (every 10 ticks)
+    if((ticks % 10) == 0) {
+      tcp_timer_check();
+    }
+#endif
   }
 
   // ask for the next timer interrupt. this also clears

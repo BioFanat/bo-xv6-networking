@@ -55,6 +55,7 @@ ifeq ($(LAB),net)
 OBJS += \
 	$K/e1000.o \
 	$K/net.o \
+	$K/tcp.o \
 	$K/pci.o
 endif
 
@@ -281,7 +282,8 @@ UPROGS += \
 	$U/_netmon\
 	$U/_netloop\
 	$U/_host\
-	$U/_ping
+	$U/_ping\
+	$U/_http
 endif
 
 UEXTRA=

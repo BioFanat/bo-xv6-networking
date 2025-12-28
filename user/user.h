@@ -41,6 +41,10 @@ int rawsock_bind(int);
 int rawsock_recv(int, uint32*, char *, uint32);
 int rawsock_send(uint32, int, char *, uint32);
 uint64 gettime(void);
+int tcp_connect(uint32 dst_ip, uint16 dst_port);
+int tcp_send(int sockid, char *buf, int len);
+int tcp_recv(int sockid, char *buf, int maxlen);
+int tcp_close(int sockid);
 #endif
 #ifdef LAB_PGTBL
 int ugetpid(void);

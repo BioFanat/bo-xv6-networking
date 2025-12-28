@@ -82,6 +82,87 @@ struct icmp {
 #define ICMP_ECHO_REPLY   0
 #define ICMP_ECHO_REQUEST 8
 
+// a TCP packet header (comes after an IP header).
+struct tcp {
+  uint16 sport;    // source port
+  uint16 dport;    // destination port
+  uint32 seq;      // sequence number
+  uint32 ack;      // acknowledgment number
+  uint8  off;      // data offset (header length in 32-bit words) << 4
+  uint8  flags;    // TCP flags
+  uint16 win;      // window size
+  uint16 sum;      // checksum
+  uint16 urp;      // urgent pointer
+} __attribute__((packed));
+
+// TCP flags
+#define TCP_FIN  0x01
+#define TCP_SYN  0x02
+#define TCP_RST  0x04
+#define TCP_PSH  0x08
+#define TCP_ACK  0x10
+#define TCP_URG  0x20
+
+// TCP states (client-only subset)
+enum tcp_state {
+  TCP_CLOSED,
+  TCP_SYN_SENT,
+  TCP_ESTABLISHED,
+  TCP_FIN_WAIT_1,
+  TCP_FIN_WAIT_2,
+  TCP_TIME_WAIT,
+  TCP_CLOSE_WAIT,
+  TCP_LAST_ACK
+};
+
+// TCP configuration constants
+#define NTCP              8       // max concurrent TCP connections
+#define TCP_BUFSIZE       4096    // send/receive buffer size (1 page)
+#define TCP_MSS           1460    // max segment size (ETH MTU - IP - TCP headers)
+#define TCP_TIMEOUT_TICKS 5       // retransmission timeout (~500ms)
+#define TCP_TIME_WAIT_TICKS 600   // TIME_WAIT duration (~60 seconds)
+#define TCP_MAX_RETRIES   5       // max retransmission attempts
+
+// TCP connection structure
+struct tcp_conn {
+  int used;                       // is this connection slot in use?
+  enum tcp_state state;           // TCP state machine state
+
+  // Connection 4-tuple
+  uint32 local_ip;                // local IP address
+  uint16 local_port;              // local port (host byte order)
+  uint32 remote_ip;               // remote IP address (host byte order)
+  uint16 remote_port;             // remote port (host byte order)
+
+  // Sequence numbers
+  uint32 snd_una;                 // send unacknowledged
+  uint32 snd_nxt;                 // send next
+  uint32 rcv_nxt;                 // receive next (expected)
+  uint32 iss;                     // initial send sequence number
+  uint32 irs;                     // initial receive sequence number
+
+  // Window sizes
+  uint16 snd_wnd;                 // send window (from remote)
+  uint16 rcv_wnd;                 // receive window (our advertised)
+
+  // Send buffer (unacknowledged data for retransmission)
+  char *snd_buf;                  // page-sized send buffer
+  uint32 snd_buf_start;           // start offset in buffer
+  uint32 snd_buf_len;             // bytes of unacked data in buffer
+
+  // Receive buffer (reassembled data waiting for user)
+  char *rcv_buf;                  // page-sized receive buffer
+  uint32 rcv_buf_start;           // start offset in buffer
+  uint32 rcv_buf_len;             // bytes of data available
+
+  // Retransmission timer
+  uint64 rto_deadline;            // next retransmit time (in ticks)
+  int retries;                    // number of retransmission attempts
+
+  // TIME_WAIT timer
+  uint64 timewait_deadline;       // when to close from TIME_WAIT
+};
+
 // an ARP packet (comes after an Ethernet header).
 struct arp {
   uint16 hrd; // format of hardware address

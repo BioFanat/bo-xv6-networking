@@ -54,3 +54,7 @@ entry("pgpte");
 entry("kpgtbl");
 entry("netstats");
 entry("netreset");
+entry("tcp_connect");
+entry("tcp_send");
+entry("tcp_recv");
+entry("tcp_close");

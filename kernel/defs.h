@@ -242,4 +242,13 @@ void            net_rx(char *buf, int len);
 uint64          sys_netstats(void);
 uint64          sys_netreset(void);
 
+// tcp.c
+void            tcp_init(void);
+void            tcp_rx(char *buf, int len);
+void            tcp_timer_check(void);
+uint64          sys_tcp_connect(void);
+uint64          sys_tcp_send(void);
+uint64          sys_tcp_recv(void);
+uint64          sys_tcp_close(void);
+
 #endif

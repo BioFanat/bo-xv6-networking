@@ -41,3 +41,7 @@
 #define SYS_gettime          38
 #define SYS_netstats  39
 #define SYS_netreset  40
+#define SYS_tcp_connect  41
+#define SYS_tcp_send     42
+#define SYS_tcp_recv     43
+#define SYS_tcp_close    44

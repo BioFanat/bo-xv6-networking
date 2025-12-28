@@ -116,6 +116,10 @@ extern uint64 sys_rawsock_bind(void);
 extern uint64 sys_rawsock_recv(void);
 extern uint64 sys_rawsock_send(void);
 extern uint64 sys_gettime(void);
+extern uint64 sys_tcp_connect(void);
+extern uint64 sys_tcp_send(void);
+extern uint64 sys_tcp_recv(void);
+extern uint64 sys_tcp_close(void);
 #endif
 #ifdef LAB_PGTBL
 extern uint64 sys_pgpte(void);
@@ -157,6 +161,10 @@ static uint64 (*syscalls[])(void) = {
 [SYS_gettime] sys_gettime,
 [SYS_netstats] sys_netstats,
 [SYS_netreset] sys_netreset,
+[SYS_tcp_connect] sys_tcp_connect,
+[SYS_tcp_send] sys_tcp_send,
+[SYS_tcp_recv] sys_tcp_recv,
+[SYS_tcp_close] sys_tcp_close,
 #endif
 #ifdef LAB_PGTBL
 [SYS_pgpte] sys_pgpte,

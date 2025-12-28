@@ -10,14 +10,14 @@
 #include "file.h"
 #include "net.h"
 
-// xv6's ethernet and IP addresses
-static uint8 local_mac[ETHADDR_LEN] = { 0x52, 0x54, 0x00, 0x12, 0x34, 0x56 };
-static uint32 local_ip = MAKE_IP_ADDR(10, 0, 2, 15);
+// xv6's ethernet and IP addresses (non-static for TCP access)
+uint8 local_mac[ETHADDR_LEN] = { 0x52, 0x54, 0x00, 0x12, 0x34, 0x56 };
+uint32 local_ip = MAKE_IP_ADDR(10, 0, 2, 15);
 
 // qemu host's ethernet address.
-static uint8 host_mac[ETHADDR_LEN] = { 0x52, 0x55, 0x0a, 0x00, 0x02, 0x02 };
+uint8 host_mac[ETHADDR_LEN] = { 0x52, 0x55, 0x0a, 0x00, 0x02, 0x02 };
 
-static struct spinlock netlock;
+struct spinlock netlock;
 extern struct spinlock e1000_lock;
 
 // Forward declarations
@@ -600,7 +600,13 @@ ip_rx(char *buf, int len)
   }
   
   release(&netlock);
-  
+
+  // check if it's a TCP packet
+  if(protocol == IPPROTO_TCP) {
+    tcp_rx(buf, len);
+    return;
+  }
+
   // check if it's a UDP packet
   if(protocol != IPPROTO_UDP) {
     kfree(buf);
